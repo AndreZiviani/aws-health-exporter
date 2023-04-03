@@ -15,7 +15,7 @@ func (m *Metrics) GetOrgEvents() []HealthEvent {
 		m.health,
 		&health.DescribeEventsForOrganizationInput{
 			Filter: &healthTypes.OrganizationEventFilter{
-				EndTime: &healthTypes.DateTimeRange{
+				LastUpdatedTime: &healthTypes.DateTimeRange{
 					From: &m.lastScrape,
 					To:   &now,
 				},

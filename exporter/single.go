@@ -15,7 +15,7 @@ func (m *Metrics) GetEvents() []HealthEvent {
 		m.health,
 		&health.DescribeEventsInput{
 			Filter: &healthTypes.EventFilter{
-				EndTimes: []healthTypes.DateTimeRange{
+				LastUpdatedTimes: []healthTypes.DateTimeRange{
 					{
 						From: &m.lastScrape,
 						To:   &now,
