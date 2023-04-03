@@ -48,7 +48,7 @@ func (m *Metrics) init(ctx context.Context, c *cli.Context) {
 	m.health = health.NewFromConfig(cfg)
 	m.awsconfig = cfg
 
-	m.lastScrape = time.Now().AddDate(0, 0, -7)
+	m.lastScrape = time.Now()
 
 	m.slackToken = c.String("slack-token")
 	m.slackChannel = c.String("slack-channel")
