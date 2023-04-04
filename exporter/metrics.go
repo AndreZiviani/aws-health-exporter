@@ -2,8 +2,10 @@ package exporter
 
 import (
 	"context"
+	"os"
 	"strings"
 	"time"
+	_ "time/tzdata"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
@@ -55,6 +57,12 @@ func (m *Metrics) init(ctx context.Context, c *cli.Context) {
 	m.slackApi = slack.New(m.slackToken)
 
 	m.organizationEnabled = m.HealthOrganizationEnabled(ctx)
+
+	m.tz, err = time.LoadLocation(os.Getenv("TZ"))
+	if err != nil {
+		panic(err.Error())
+	}
+
 }
 
 func (m *Metrics) Describe(ch chan<- *prometheus.Desc) {

@@ -18,6 +18,8 @@ type Metrics struct {
 	slackApi     *slack.Client
 	slackToken   string
 	slackChannel string
+
+	tz *time.Location
 }
 
 type HealthEvent struct {

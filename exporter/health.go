@@ -3,9 +3,7 @@ package exporter
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
-	"time"
 
 	"github.com/aws/aws-sdk-go-v2/service/health"
 	healthTypes "github.com/aws/aws-sdk-go-v2/service/health/types"
@@ -23,11 +21,6 @@ func (m *Metrics) HealthOrganizationEnabled(ctx context.Context) bool {
 }
 
 func (m Metrics) SendSlackNotification(events []HealthEvent) {
-	tz, err := time.LoadLocation(os.Getenv("TZ"))
-	if err != nil {
-		panic(err.Error())
-	}
-
 	for _, e := range events {
 
 		resources := m.extractResources(e.AffectedResources)
@@ -43,7 +36,7 @@ func (m Metrics) SendSlackNotification(events []HealthEvent) {
 			{Title: "Resource(s)", Value: resources, Short: true},
 			{Title: "Service", Value: service, Short: true},
 			{Title: "Region", Value: region, Short: true},
-			{Title: "Start Time", Value: e.Event.StartTime.In(tz).String(), Short: true},
+			{Title: "Start Time", Value: e.Event.StartTime.In(m.tz).String(), Short: true},
 			{Title: "Status", Value: string(status), Short: true},
 			{Title: "Event ARN", Value: fmt.Sprintf("`%s`", *e.Event.Arn), Short: false},
 			{Title: "Updates", Value: *e.EventDescription.LatestDescription, Short: false},
@@ -53,7 +46,7 @@ func (m Metrics) SendSlackNotification(events []HealthEvent) {
 			text = fmt.Sprintf(":heavy_check_mark:*[RESOLVED] The AWS Health issue with the %s service in the %s region is now resolved.*", service, region)
 			color = "18be52"
 			attachmentFields = append(attachmentFields[:6], attachmentFields[5:]...)
-			attachmentFields[5] = slack.AttachmentField{Title: "End Time", Value: e.Event.EndTime.In(tz).String(), Short: true}
+			attachmentFields[5] = slack.AttachmentField{Title: "End Time", Value: e.Event.EndTime.In(m.tz).String(), Short: true}
 		} else {
 			text = fmt.Sprintf(":rotating_light:*[NEW] AWS Health reported an issue with the %s service in the %s region.*", service, region)
 			color = "danger"
