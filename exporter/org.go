@@ -19,6 +19,7 @@ func (m *Metrics) GetOrgEvents() []HealthEvent {
 					From: &m.lastScrape,
 					To:   &now,
 				},
+				Regions: m.regions,
 			},
 		})
 

@@ -21,6 +21,7 @@ func (m *Metrics) GetEvents() []HealthEvent {
 						To:   &now,
 					},
 				},
+				Regions: m.regions,
 			},
 		})
 

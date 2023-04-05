@@ -63,6 +63,9 @@ func (m *Metrics) init(ctx context.Context, c *cli.Context) {
 		panic(err.Error())
 	}
 
+	if c.String("regions") != "all-regions" {
+		m.regions = strings.Split(c.String("regions"), ",")
+	}
 }
 
 func (m *Metrics) Describe(ch chan<- *prometheus.Desc) {

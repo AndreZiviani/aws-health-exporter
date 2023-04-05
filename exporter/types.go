@@ -10,16 +10,18 @@ import (
 )
 
 type Metrics struct {
-	health              *health.Client
-	organizationEnabled bool
-	awsconfig           aws.Config
-	lastScrape          time.Time
+	health *health.Client
 
 	slackApi     *slack.Client
 	slackToken   string
 	slackChannel string
 
-	tz *time.Location
+	tz         *time.Location
+	lastScrape time.Time
+
+	awsconfig           aws.Config
+	organizationEnabled bool
+	regions             []string
 }
 
 type HealthEvent struct {
