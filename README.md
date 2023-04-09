@@ -90,4 +90,5 @@ A helm chart is available [here][chart]
 
 [aha-blog]: https://aws.amazon.com/blogs/mt/aws-health-aware-customize-aws-health-alerts-for-organizational-and-personal-aws-accounts/
 [health-api]: https://docs.aws.amazon.com/health/latest/ug/health-api.html
+[health-org]: https://docs.aws.amazon.com/health/latest/ug/aggregate-events.html
 [chart]: https://github.com/AndreZiviani/helm-charts/tree/main/charts/aws-health-exporter
