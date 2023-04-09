@@ -22,6 +22,10 @@ type Metrics struct {
 	awsconfig           aws.Config
 	organizationEnabled bool
 	regions             []string
+
+	ignoreEvents        []string
+	ignoreResources     []string
+	ignoreResourceEvent []string
 }
 
 type HealthEvent struct {
