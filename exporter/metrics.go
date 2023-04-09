@@ -3,6 +3,7 @@ package exporter
 import (
 	"context"
 	"os"
+	"sort"
 	"strings"
 	"time"
 	_ "time/tzdata"
@@ -65,7 +66,24 @@ func (m *Metrics) init(ctx context.Context, c *cli.Context) {
 
 	if c.String("regions") != "all-regions" {
 		m.regions = strings.Split(c.String("regions"), ",")
+		sort.Strings(m.regions)
 	}
+
+	if len(c.String("ignore-events")) > 0 {
+		m.ignoreEvents = strings.Split(c.String("ignore-events"), ",")
+		sort.Strings(m.ignoreEvents)
+	}
+
+	if len(c.String("ignore-resources")) > 0 {
+		m.ignoreResources = strings.Split(c.String("ignore-resources"), ",")
+		sort.Strings(m.ignoreResources)
+	}
+
+	if len(c.String("ignore-resource-event")) > 0 {
+		m.ignoreResourceEvent = strings.Split(c.String("ignore-resource-event"), ",")
+		sort.Strings(m.ignoreResourceEvent)
+	}
+
 }
 
 func (m *Metrics) Describe(ch chan<- *prometheus.Desc) {
@@ -73,18 +91,7 @@ func (m *Metrics) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (m *Metrics) Collect(ch chan<- prometheus.Metric) {
-	var events []HealthEvent
-	if m.organizationEnabled {
-		events = m.GetOrgEvents()
-	} else {
-		events = m.GetEvents()
-	}
-
-	if len(events) == 0 {
-		return
-	}
-
-	m.SendSlackNotification(events)
+	m.GetHealthEvents()
 }
 
 func sanitizeLabel(label string) string {

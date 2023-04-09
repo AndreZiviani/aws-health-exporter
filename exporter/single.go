@@ -8,7 +8,7 @@ import (
 	healthTypes "github.com/aws/aws-sdk-go-v2/service/health/types"
 )
 
-func (m *Metrics) GetEvents() []HealthEvent {
+func (m *Metrics) GetAccountEvents() []HealthEvent {
 	ctx := context.TODO()
 	now := time.Now()
 	pag := health.NewDescribeEventsPaginator(

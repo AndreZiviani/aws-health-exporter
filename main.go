@@ -22,6 +22,9 @@ func main() {
 		&cli.StringFlag{Name: "slack-token", Usage: "Slack token", EnvVars: []string{"SLACK_TOKEN"}, Required: true},
 		&cli.StringFlag{Name: "slack-channel", Usage: "Slack channel id", EnvVars: []string{"SLACK_CHANNEL"}, Required: true},
 		&cli.StringFlag{Name: "assume-role", Usage: "Assume another AWS IAM role", EnvVars: []string{"ASSUME_ROLE"}},
+		&cli.StringFlag{Name: "ignore-events", Usage: "Comma separated list of events to be ignored on all resources"},
+		&cli.StringFlag{Name: "ignore-resources", Usage: "Comma separated list of resources to be ignored on all events, format is dependant on resource type (some are ARN others are Name, check AWS docs)"},
+		&cli.StringFlag{Name: "ignore-resource-event", Usage: "Comma separated list of events to be ignored on a specific resource (format: <event name>:<resource identifier>)"},
 	}
 
 	app := &cli.App{

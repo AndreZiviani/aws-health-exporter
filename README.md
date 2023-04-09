@@ -44,6 +44,46 @@ You must specify, at least, the following parameters via command options or envi
    --slack-channel value             Slack channel id [$SLACK_CHANNEL]
 ```
 
+## Ignoring alerts
+
+There are three flags that allows you to suppress an event, all of them can be used simultaneously:
+* `--ignore-events`: Ignore all notifications of the specified event types.
+* `--ignore-resources`: Ignore all notifications related to the specified resource, note that the notification will only be suppressed
+if all of its resources are ignored.
+* `--ignore-resource-event`: Ignore only the specified event type of that specific resource, format `<event type>:<resource identifier>`
+
+All options allows multiple resources/events to be specified by using comma separated values:
+```
+--ignore-events "AWS_ELASTICACHE_BEFORE_UPDATE_DUE_NOTIFICATION,AWS_VPN_SINGLE_TUNNEL_NOTIFICATION"
+--ignore-resources "elasticache-0,elasticache-1"
+--ignore-resource-event "AWS_ELASTICACHE_BEFORE_UPDATE_DUE_NOTIFICATION:elasticache-0,AWS_VPN_SINGLE_TUNNEL_NOTIFICATION:vpn-01234567890abcdef"
+```
+
+Unfortunately (AFAIK) theres no documentation for all of the event types and resource identifiers (sometimes this is the ARN but
+other times it is the resource name), I suggest extracting them from the Slack message.
+
+Elasticache update example:
+```
+Event ARN: arn:aws:health:us-east-1::event/ELASTICACHE/AWS_ELASTICACHE_BEFORE_UPDATE_DUE_NOTIFICATION/AWS_ELASTICACHE_BEFORE_UPDATE_DUE_NOTIFICATION-us-east-1-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
+                                                                        ^
+                                                                   event type
+
+Resource(s): elasticache-0, elasticache-1
+                       ^
+                resource identifier
+```
+
+VPN single tunnel example:
+```
+Event ARN: arn:aws:health:us-east-1::event/VPN/AWS_VPN_SINGLE_TUNNEL_NOTIFICATION/AWS_VPN_SINGLE_TUNNEL_NOTIFICATION-aaaaaaaaaaaa-us-east-1-2023-M04
+                                                             ^
+                                                        event type
+
+Resource(s): vpn-01234567890abcdef
+                       ^
+                resource identifier
+```
+
 ## Helm chart
 
 A helm chart is available [here][chart]
