@@ -58,6 +58,9 @@ func (m *Metrics) init(ctx context.Context, c *cli.Context) {
 	m.slackApi = slack.New(m.slackToken)
 
 	m.organizationEnabled = m.HealthOrganizationEnabled(ctx)
+	if m.organizationEnabled {
+		m.GetOrgAccountsName(ctx)
+	}
 
 	m.tz, err = time.LoadLocation(os.Getenv("TZ"))
 	if err != nil {

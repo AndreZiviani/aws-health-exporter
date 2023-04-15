@@ -114,7 +114,11 @@ func (m Metrics) extractResources(resources []healthTypes.AffectedEntity) string
 
 func (m Metrics) extractAccounts(accounts []string) string {
 	if len(accounts) > 0 {
-		return strings.Join(accounts, ",")
+		if m.organizationEnabled {
+			return strings.Join(m.getAccountsNameFromIds(accounts), ",")
+		} else {
+			return strings.Join(accounts, ",")
+		}
 	} else {
 		return "All accounts in region"
 	}

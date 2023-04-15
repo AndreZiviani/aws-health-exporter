@@ -6,6 +6,7 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/service/health"
 	healthTypes "github.com/aws/aws-sdk-go-v2/service/health/types"
+	"github.com/aws/aws-sdk-go-v2/service/organizations"
 )
 
 func (m *Metrics) GetOrgEvents() []HealthEvent {
@@ -113,4 +114,38 @@ func (m Metrics) getAffectedEntitiesForOrg(ctx context.Context, event healthType
 
 		enrichedEvent.AffectedResources = append(enrichedEvent.AffectedResources, resources.Entities...)
 	}
+}
+
+func (m *Metrics) GetOrgAccountsName(ctx context.Context) {
+	org := organizations.NewFromConfig(m.awsconfig)
+	pag := organizations.NewListAccountsPaginator(
+		org,
+		&organizations.ListAccountsInput{},
+	)
+
+	m.accountNames = make(map[string]string, 0)
+
+	for pag.HasMorePages() {
+		accounts, err := pag.NextPage(ctx)
+		if err != nil {
+			panic(err.Error())
+		}
+
+		for _, account := range accounts.Accounts {
+			m.accountNames[*account.Id] = *account.Name
+		}
+	}
+}
+
+func (m Metrics) getAccountsNameFromIds(ids []string) []string {
+	names := make([]string, len(ids))
+	for i, account := range ids {
+		if name, ok := m.accountNames[account]; ok {
+			names[i] = name
+		} else {
+			names[i] = account
+		}
+	}
+
+	return names
 }

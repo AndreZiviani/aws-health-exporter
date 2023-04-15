@@ -26,6 +26,8 @@ type Metrics struct {
 	ignoreEvents        []string
 	ignoreResources     []string
 	ignoreResourceEvent []string
+
+	accountNames map[string]string
 }
 
 type HealthEvent struct {
