@@ -44,6 +44,13 @@ You must specify, at least, the following parameters via command options or envi
    --slack-channel value             Slack channel id [$SLACK_CHANNEL]
 ```
 
+## Filtering regions
+
+You can filter alerts from one or more regions with the flag `--regions`, you can set multiple regions separated by `,`.
+There are two special values:
+* `all-regions`: Do not filter any region, send alerts from all regions
+* `global`: Send alerts that are global and/or no account specific, this can be used with other regions (e.g. `global,us-east-1,us-west-1`)
+
 ## Ignoring alerts
 
 There are three flags that allows you to suppress an event, all of them can be used simultaneously:
