@@ -10,7 +10,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
-	"github.com/aws/aws-sdk-go-v2/service/health"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
@@ -36,20 +35,20 @@ func NewMetrics(ctx context.Context, registry *prometheus.Registry, c *cli.Conte
 
 func (m *Metrics) init(ctx context.Context, c *cli.Context) {
 	cfg, err := newAWSConfig(ctx)
+
 	if err != nil {
 		panic(err.Error())
 	}
 
-	cfg.Region = "us-east-1"
+	m.awsconfig = cfg
 
 	if len(c.String("assume-role")) > 0 {
-		stsclient := sts.NewFromConfig(cfg)
+		stsclient := sts.NewFromConfig(m.awsconfig)
 		creds := stscreds.NewAssumeRoleProvider(stsclient, c.String("assume-role"))
-		cfg.Credentials = aws.NewCredentialsCache(creds)
+		m.awsconfig.Credentials = aws.NewCredentialsCache(creds)
 	}
 
-	m.health = health.NewFromConfig(cfg)
-	m.awsconfig = cfg
+	m.NewHealthClient(ctx)
 
 	m.lastScrape = time.Now()
 
