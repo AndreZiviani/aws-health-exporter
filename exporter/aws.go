@@ -66,11 +66,8 @@ func (m *Metrics) NewHealthClient(ctx context.Context) {
 	cname = strings.TrimSuffix(cname, ".")
 	region := strings.Split(cname, ".")[1]
 
-	cfg, err := newAWSConfig(ctx, config.WithRegion(region))
-
-	if err != nil {
-		panic(err.Error())
-	}
+	cfg := m.awsconfig
+	cfg.Region = region
 
 	m.health = health.NewFromConfig(cfg, health.WithEndpointResolver(health.EndpointResolverFromURL(fmt.Sprintf("https://%s", cname))))
 }
