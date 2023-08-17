@@ -135,6 +135,11 @@ func ignoreEvents(ignoredEvents []string, event string) bool {
 }
 
 func ignoreResources(ignoredResources []string, resources []healthTypes.AffectedEntity) bool {
+	if len(ignoredResources) == 0 {
+		// empty ignore list
+		return false
+	}
+
 	size := len(resources)
 
 	for _, ignored := range ignoredResources {
@@ -155,6 +160,11 @@ func ignoreResources(ignoredResources []string, resources []healthTypes.Affected
 }
 
 func ignoreResourceEvent(ignoredResourceEvent []string, event HealthEvent) bool {
+	if len(ignoredResourceEvent) == 0 {
+		// empty ignore list
+		return false
+	}
+
 	size := len(event.AffectedResources)
 
 	for _, ignored := range ignoredResourceEvent {
