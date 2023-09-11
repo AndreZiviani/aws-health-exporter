@@ -166,6 +166,7 @@ func ignoreResourceEvent(ignoredResourceEvent []string, event HealthEvent) bool 
 	}
 
 	size := len(event.AffectedResources)
+	resourceIgnored := false
 
 	for _, ignored := range ignoredResourceEvent {
 		tmp := strings.Split(ignored, ":")
@@ -173,12 +174,13 @@ func ignoreResourceEvent(ignoredResourceEvent []string, event HealthEvent) bool 
 
 		for _, resource := range event.AffectedResources {
 			if *resource.EntityValue == ignoredResource && *event.Event.EventTypeCode == ignoredEvent {
+				resourceIgnored = true
 				size -= 1
 			}
 		}
 	}
 
-	if size == 0 {
+	if resourceIgnored && size == 0 {
 		// all resources are ignored, ignoring entire alert
 		return true
 	}
