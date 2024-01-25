@@ -73,7 +73,11 @@ func (m Metrics) SendSlackNotification(e HealthEvent) {
 		text = fmt.Sprintf(":heavy_check_mark:*[RESOLVED] The AWS Health issue with the %s service in the %s region is now resolved.*", service, region)
 		color = "18be52"
 		attachmentFields = append(attachmentFields[:6], attachmentFields[5:]...)
-		attachmentFields[5] = slack.AttachmentField{Title: "End Time", Value: e.Event.EndTime.In(m.tz).String(), Short: true}
+		if e.Event.EndTime != nil {
+			attachmentFields[5] = slack.AttachmentField{Title: "End Time", Value: e.Event.EndTime.In(m.tz).String(), Short: true}
+		} else {
+			attachmentFields[5] = slack.AttachmentField{Title: "End Time", Value: "-", Short: true}
+		}
 	} else {
 		text = fmt.Sprintf(":rotating_light:*[NEW] AWS Health reported an issue with the %s service in the %s region.*", service, region)
 		color = "danger"
