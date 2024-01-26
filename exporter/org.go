@@ -90,29 +90,38 @@ func (m Metrics) getEventDetailsForOrg(ctx context.Context, event healthTypes.Or
 }
 
 func (m Metrics) getAffectedEntitiesForOrg(ctx context.Context, event healthTypes.OrganizationEvent, enrichedEvent *HealthEvent) {
-	var pagResources *health.DescribeAffectedEntitiesForOrganizationPaginator
+	pagResources := make([]*health.DescribeAffectedEntitiesForOrganizationPaginator, 0)
 	if len(enrichedEvent.AffectedAccounts) > 0 {
-		accountFilter := make([]healthTypes.EventAccountFilter, len(enrichedEvent.AffectedAccounts))
-		for i, account := range enrichedEvent.AffectedAccounts {
-			accountFilter[i] = healthTypes.EventAccountFilter{EventArn: event.Arn, AwsAccountId: &account}
-		}
+		affectedAccountsSlices := m.splitSlice(enrichedEvent.AffectedAccounts, 10)
+		for _, slice := range affectedAccountsSlices {
+			accountFilter := make([]healthTypes.EventAccountFilter, len(slice))
+			for i, account := range slice {
+				accountFilter[i] = healthTypes.EventAccountFilter{EventArn: event.Arn, AwsAccountId: &account}
+			}
 
-		pagResources = health.NewDescribeAffectedEntitiesForOrganizationPaginator(
-			m.health,
-			&health.DescribeAffectedEntitiesForOrganizationInput{OrganizationEntityFilters: accountFilter})
+			pagResources = append(pagResources, health.NewDescribeAffectedEntitiesForOrganizationPaginator(
+				m.health,
+				&health.DescribeAffectedEntitiesForOrganizationInput{OrganizationEntityFilters: accountFilter},
+			),
+			)
+		}
 	} else {
-		pagResources = health.NewDescribeAffectedEntitiesForOrganizationPaginator(
+		pagResources = append(pagResources, health.NewDescribeAffectedEntitiesForOrganizationPaginator(
 			m.health,
-			&health.DescribeAffectedEntitiesForOrganizationInput{OrganizationEntityFilters: []healthTypes.EventAccountFilter{{EventArn: event.Arn}}})
+			&health.DescribeAffectedEntitiesForOrganizationInput{OrganizationEntityFilters: []healthTypes.EventAccountFilter{{EventArn: event.Arn}}},
+		),
+		)
 	}
 
-	for pagResources.HasMorePages() {
-		resources, err := pagResources.NextPage(ctx)
-		if err != nil {
-			panic(err.Error())
-		}
+	for _, slices := range pagResources {
+		for slices.HasMorePages() {
+			resources, err := slices.NextPage(ctx)
+			if err != nil {
+				panic(err.Error())
+			}
 
-		enrichedEvent.AffectedResources = append(enrichedEvent.AffectedResources, resources.Entities...)
+			enrichedEvent.AffectedResources = append(enrichedEvent.AffectedResources, resources.Entities...)
+		}
 	}
 }
 
@@ -148,4 +157,14 @@ func (m Metrics) getAccountsNameFromIds(ids []string) []string {
 	}
 
 	return names
+}
+
+func (m Metrics) splitSlice(slice []string, batchSize int) [][]string {
+	batches := make([][]string, 0, (len(slice)+batchSize-1)/batchSize)
+	for batchSize < len(slice) {
+		slice, batches = slice[batchSize:], append(batches, slice[0:batchSize:batchSize])
+	}
+	batches = append(batches, slice)
+
+	return batches
 }
