@@ -31,6 +31,7 @@ func main() {
 		&cli.StringFlag{Name: "ignore-events", Usage: "Comma separated list of events to be ignored on all resources"},
 		&cli.StringFlag{Name: "ignore-resources", Usage: "Comma separated list of resources to be ignored on all events, format is dependant on resource type (some are ARN others are Name, check AWS docs)"},
 		&cli.StringFlag{Name: "ignore-resource-event", Usage: "Comma separated list of events to be ignored on a specific resource (format: <event name>:<resource identifier>)"},
+		&cli.BoolFlag{Name: "log-events", Usage: "Log AWS Health events as JSON", Value: false},
 
 		&cli.DurationFlag{Name: "time-shift", Usage: "[INTERNAL] Apply a time delta to event filter instead of looking at previous scrape", Hidden: true, Value: 0 * time.Second},
 	}
@@ -47,7 +48,7 @@ func main() {
 				log.Debugf("Set log level to %s", parsedLevel)
 			}
 
-			log.Infof("Starting AWS Health Exporter. [log-level=%s]", c.String("log-level"))
+			log.Infof("Starting AWS Health Exporter. [log-level=%s,log-events=%t]", c.String("log-level"), c.Bool("log-events"))
 
 			ctx := context.Background()
 

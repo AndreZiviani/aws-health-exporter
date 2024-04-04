@@ -2,11 +2,13 @@ package exporter
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/health"
 	healthTypes "github.com/aws/aws-sdk-go-v2/service/health/types"
+	log "github.com/sirupsen/logrus"
 	"github.com/slack-go/slack"
 )
 
@@ -45,11 +47,34 @@ func (m *Metrics) GetHealthEvents() []HealthEvent {
 
 		events = append(events, e)
 		m.SendSlackNotification(e)
+		m.LogEvent(e)
 	}
 
 	return events
 }
 
+func (m Metrics) LogEvent(e HealthEvent) {
+	if !m.logEvents {
+		return
+	}
+	msg := map[string]string{
+		"resources":  m.extractResources(e.AffectedResources),
+		"accounts":   m.extractAccounts(e.AffectedAccounts),
+		"service":    *e.Event.Service,
+		"region":     *e.Event.Region,
+		"status":     string(e.Event.StatusCode),
+		"Start Time": e.Event.StartTime.In(m.tz).String(),
+		"Event ARN":  fmt.Sprintf("`%s`", *e.Event.Arn),
+		"Updates":    *e.EventDescription.LatestDescription,
+	}
+
+	j, _ := json.Marshal(msg)
+
+	log.WithFields(log.Fields{
+		"event": string(j),
+	}).Info()
+
+}
 func (m Metrics) SendSlackNotification(e HealthEvent) {
 	if m.slackApi == nil {
 		return

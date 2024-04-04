@@ -109,4 +109,7 @@ func (m *Metrics) init(ctx context.Context, c *cli.Context) {
 		sort.Strings(m.ignoreResourceEvent)
 	}
 
+	if c.Bool("log-events") {
+		m.logEvents = true
+	}
 }
