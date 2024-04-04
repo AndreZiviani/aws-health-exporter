@@ -21,15 +21,15 @@ func (m *Metrics) HealthOrganizationEnabled(ctx context.Context) bool {
 }
 
 func (m *Metrics) GetHealthEvents() []HealthEvent {
-	var events []HealthEvent
+	var tmp, events []HealthEvent
 
 	if m.organizationEnabled {
-		events = m.GetOrgEvents()
+		tmp = m.GetOrgEvents()
 	} else {
-		events = m.GetAccountEvents()
+		tmp = m.GetAccountEvents()
 	}
 
-	for _, e := range events {
+	for _, e := range tmp {
 		if ignoreEvents(m.ignoreEvents, *e.Event.EventTypeCode) {
 			continue
 		}
@@ -43,6 +43,7 @@ func (m *Metrics) GetHealthEvents() []HealthEvent {
 			continue
 		}
 
+		events = append(events, e)
 		m.SendSlackNotification(e)
 	}
 

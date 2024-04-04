@@ -11,24 +11,45 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/slack-go/slack"
 	"github.com/urfave/cli/v2"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
 )
 
-const (
-	namespace = "aws_health"
-)
-
-func NewMetrics(ctx context.Context, registry *prometheus.Registry, c *cli.Context) (*Metrics, error) {
+func NewMetrics(ctx context.Context, meter metric.Meter, c *cli.Context) (*Metrics, error) {
 	m := Metrics{}
 
 	m.init(ctx, c)
 
-	registry.MustRegister(&m)
-	registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
-	registry.MustRegister(collectors.NewGoCollector())
+	g, _ := meter.Int64ObservableGauge("event", metric.WithDescription("Status of AWS Health events"))
+	meter.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
+		events := m.GetHealthEvents()
+		for _, e := range events {
+			attributes := metric.WithAttributes(
+				attribute.Key("region").String(aws.ToString(e.Event.Region)),
+				attribute.Key("service").String(aws.ToString(e.Event.Service)),
+				attribute.Key("scope").String(string(e.Event.EventScopeCode)),
+				attribute.Key("category").String(string(e.Event.EventTypeCategory)),
+				attribute.Key("code").String(aws.ToString(e.Event.EventTypeCode)),
+			)
+
+			status := int64(1) // open
+			if e.Event.StatusCode != "open" {
+				status = int64(0) // closed
+			}
+
+			if len(e.AffectedAccounts) > 0 {
+				for _, account := range e.AffectedAccounts {
+					o.ObserveInt64(g, status, attributes, metric.WithAttributes(attribute.Key("account").String(account)))
+				}
+			} else {
+				o.ObserveInt64(g, status, attributes)
+			}
+		}
+
+		return nil
+	}, g)
 
 	return &m, nil
 }
@@ -88,16 +109,4 @@ func (m *Metrics) init(ctx context.Context, c *cli.Context) {
 		sort.Strings(m.ignoreResourceEvent)
 	}
 
-}
-
-func (m *Metrics) Describe(ch chan<- *prometheus.Desc) {
-	prometheus.DescribeByCollect(m, ch)
-}
-
-func (m *Metrics) Collect(ch chan<- prometheus.Metric) {
-	m.GetHealthEvents()
-}
-
-func sanitizeLabel(label string) string {
-	return strings.Replace(strings.Replace(label, ".", "_", -1), "/", "_", -1)
 }

@@ -8,10 +8,15 @@ import (
 	"time"
 
 	"github.com/AndreZiviani/aws-health-exporter/exporter"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
+	"go.opentelemetry.io/contrib/instrumentation/runtime"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	semconv "go.opentelemetry.io/otel/semconv/v1.24.0"
 )
 
 func main() {
@@ -44,30 +49,20 @@ func main() {
 
 			log.Infof("Starting AWS Health Exporter. [log-level=%s]", c.String("log-level"))
 
-			ctx := context.TODO()
+			ctx := context.Background()
 
-			registry := prometheus.NewRegistry()
+			provider, err := newMeter()
+			if err != nil {
+				log.Fatal(err)
+			}
+			defer provider.Shutdown(ctx)
 
-			_, err = exporter.NewMetrics(ctx, registry, c)
+			_, err = exporter.NewMetrics(ctx, otel.Meter("aws-health-exporter"), c)
 			if err != nil {
 				log.Fatal(err)
 			}
 
-			log.Infof("Starting metric http endpoint [address=%s, path=%s, regions=%s]", c.String("listen-address"), c.String("metrics-path"), c.String("regions"))
-			http.Handle(c.String("metrics-path"), promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
-			http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(http.StatusOK)
-				w.Write([]byte(`<html>
-					<head><title>AWS Health Exporter</title></head>
-					<body>
-					<h1>AWS Health Exporter</h1>
-					<p><a href="` + c.String("metrics-path") + `">Metrics</a></p>
-					</body>
-					</html>
-				`))
-
-			})
-			log.Fatal(http.ListenAndServe(c.String("listen-address"), nil))
+			serveMetrics(c)
 
 			return nil
 		},
@@ -80,4 +75,44 @@ func main() {
 	}
 
 	return
+}
+
+func newMeter() (*metric.MeterProvider, error) {
+	promExporter, err := prometheus.New(prometheus.WithNamespace("aws_health"))
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := resource.Merge(resource.Default(),
+		resource.NewWithAttributes(semconv.SchemaURL,
+			semconv.ServiceName("aws-health-exporter"),
+			//semconv.ServiceVersion("0.1.0"),
+		))
+	if err != nil {
+		return nil, err
+	}
+
+	provider := metric.NewMeterProvider(metric.WithResource(res), metric.WithReader(promExporter))
+	otel.SetMeterProvider(provider)
+	runtime.Start()
+
+	return provider, nil
+}
+
+func serveMetrics(c *cli.Context) {
+	log.Infof("Starting metric http endpoint [address=%s, path=%s, regions=%s]", c.String("listen-address"), c.String("metrics-path"), c.String("regions"))
+	http.Handle(c.String("metrics-path"), promhttp.Handler())
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`<html>
+				<head><title>AWS Health Exporter</title></head>
+				<body>
+				<h1>AWS Health Exporter</h1>
+				<p><a href="` + c.String("metrics-path") + `">Metrics</a></p>
+				</body>
+				</html>
+			`))
+
+	})
+	log.Fatal(http.ListenAndServe(c.String("listen-address"), nil))
 }
