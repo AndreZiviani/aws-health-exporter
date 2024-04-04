@@ -50,7 +50,7 @@ func (m *Metrics) init(ctx context.Context, c *cli.Context) {
 
 	m.NewHealthClient(ctx)
 
-	m.lastScrape = time.Now()
+	m.lastScrape = time.Now().Add(c.Duration("time-shift"))
 
 	if len(c.String("slack-token")) > 0 && len(c.String("slack-channel")) > 0 {
 		m.slackToken = c.String("slack-token")

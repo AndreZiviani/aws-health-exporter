@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/AndreZiviani/aws-health-exporter/exporter"
 	"github.com/prometheus/client_golang/prometheus"
@@ -25,6 +26,8 @@ func main() {
 		&cli.StringFlag{Name: "ignore-events", Usage: "Comma separated list of events to be ignored on all resources"},
 		&cli.StringFlag{Name: "ignore-resources", Usage: "Comma separated list of resources to be ignored on all events, format is dependant on resource type (some are ARN others are Name, check AWS docs)"},
 		&cli.StringFlag{Name: "ignore-resource-event", Usage: "Comma separated list of events to be ignored on a specific resource (format: <event name>:<resource identifier>)"},
+
+		&cli.DurationFlag{Name: "time-shift", Usage: "[INTERNAL] Apply a time delta to event filter instead of looking at previous scrape", Hidden: true, Value: 0 * time.Second},
 	}
 
 	app := &cli.App{
