@@ -52,9 +52,11 @@ func (m *Metrics) init(ctx context.Context, c *cli.Context) {
 
 	m.lastScrape = time.Now()
 
-	m.slackToken = c.String("slack-token")
-	m.slackChannel = c.String("slack-channel")
-	m.slackApi = slack.New(m.slackToken)
+	if len(c.String("slack-token")) > 0 && len(c.String("slack-channel")) > 0 {
+		m.slackToken = c.String("slack-token")
+		m.slackChannel = c.String("slack-channel")
+		m.slackApi = slack.New(m.slackToken)
+	}
 
 	m.organizationEnabled = m.HealthOrganizationEnabled(ctx)
 	if m.organizationEnabled {

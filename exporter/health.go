@@ -50,6 +50,10 @@ func (m *Metrics) GetHealthEvents() []HealthEvent {
 }
 
 func (m Metrics) SendSlackNotification(e HealthEvent) {
+	if m.slackApi == nil {
+		return
+	}
+
 	resources := m.extractResources(e.AffectedResources)
 	accounts := m.extractAccounts(e.AffectedAccounts)
 
