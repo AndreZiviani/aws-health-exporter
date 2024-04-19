@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/health"
 )
@@ -78,7 +79,12 @@ func newAWSConfig(ctx context.Context, optFns ...func(*config.LoadOptions) error
 		return aws.Config{}, fmt.Errorf("Please configure the AWS_REGION environment variable")
 	}
 
-	cfg, err := config.LoadDefaultConfig(ctx, optFns...)
+	optf := append(optFns,
+		config.WithRetryer(func() aws.Retryer {
+			return retry.NewAdaptiveMode()
+		}),
+	)
+	cfg, err := config.LoadDefaultConfig(ctx, optf...)
 	if err != nil {
 		return aws.Config{}, err
 	}
