@@ -2,15 +2,17 @@ package exporter
 
 import (
 	"context"
+	"fmt"
+	"slices"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/health"
 	healthTypes "github.com/aws/aws-sdk-go-v2/service/health/types"
 	"github.com/aws/aws-sdk-go-v2/service/organizations"
 )
 
-func (m *Metrics) GetOrgEvents() []HealthEvent {
-	ctx := context.TODO()
+func (m *Metrics) getOrgEvents(ctx context.Context) ([]HealthEvent, error) {
 	now := time.Now()
 	pag := health.NewDescribeEventsForOrganizationPaginator(
 		m.health,
@@ -29,34 +31,42 @@ func (m *Metrics) GetOrgEvents() []HealthEvent {
 	for pag.HasMorePages() {
 		events, err := pag.NextPage(ctx)
 		if err != nil {
-			panic(err.Error())
+			return nil, fmt.Errorf("describing organization events: %w", err)
 		}
 
 		for _, event := range events.Events {
-			enrichedOrgEvent := m.EnrichOrgEvents(ctx, event)
-			updatedEvents = append(updatedEvents, enrichedOrgEvent)
+			enriched, err := m.enrichOrgEvent(ctx, event)
+			if err != nil {
+				return nil, err
+			}
+			updatedEvents = append(updatedEvents, enriched)
 		}
 	}
 
 	m.lastScrape = now
 
-	return updatedEvents
+	return updatedEvents, nil
 }
 
-func (m *Metrics) EnrichOrgEvents(ctx context.Context, event healthTypes.OrganizationEvent) HealthEvent {
+func (m *Metrics) enrichOrgEvent(ctx context.Context, event healthTypes.OrganizationEvent) (HealthEvent, error) {
+	enriched := HealthEvent{Arn: event.Arn}
 
-	enrichedEvent := HealthEvent{Arn: event.Arn}
+	if err := m.getAffectedAccountsForOrg(ctx, event, &enriched); err != nil {
+		return HealthEvent{}, err
+	}
 
-	m.getAffectedAccountsForOrg(ctx, event, &enrichedEvent)
+	if err := m.getEventDetailsForOrg(ctx, event, &enriched); err != nil {
+		return HealthEvent{}, err
+	}
 
-	m.getEventDetailsForOrg(ctx, event, &enrichedEvent)
+	if err := m.getAffectedEntitiesForOrg(ctx, event, &enriched); err != nil {
+		return HealthEvent{}, err
+	}
 
-	m.getAffectedEntitiesForOrg(ctx, event, &enrichedEvent)
-
-	return enrichedEvent
+	return enriched, nil
 }
 
-func (m Metrics) getAffectedAccountsForOrg(ctx context.Context, event healthTypes.OrganizationEvent, enrichedEvent *HealthEvent) {
+func (m *Metrics) getAffectedAccountsForOrg(ctx context.Context, event healthTypes.OrganizationEvent, enriched *HealthEvent) error {
 	pag := health.NewDescribeAffectedAccountsForOrganizationPaginator(
 		m.health,
 		&health.DescribeAffectedAccountsForOrganizationInput{EventArn: event.Arn})
@@ -64,89 +74,96 @@ func (m Metrics) getAffectedAccountsForOrg(ctx context.Context, event healthType
 	for pag.HasMorePages() {
 		accounts, err := pag.NextPage(ctx)
 		if err != nil {
-			panic(err.Error())
+			return fmt.Errorf("describing affected accounts of %s: %w", aws.ToString(event.Arn), err)
 		}
 
-		enrichedEvent.EventScope = accounts.EventScopeCode
-		enrichedEvent.AffectedAccounts = append(enrichedEvent.AffectedAccounts, accounts.AffectedAccounts...)
+		enriched.EventScope = accounts.EventScopeCode
+		enriched.AffectedAccounts = append(enriched.AffectedAccounts, accounts.AffectedAccounts...)
 	}
+
+	return nil
 }
 
-func (m Metrics) getEventDetailsForOrg(ctx context.Context, event healthTypes.OrganizationEvent, enrichedEvent *HealthEvent) {
-	var accountId *string
-	if enrichedEvent.EventScope == healthTypes.EventScopeCodeAccountSpecific {
-		accountId = &enrichedEvent.AffectedAccounts[0]
+func (m *Metrics) getEventDetailsForOrg(ctx context.Context, event healthTypes.OrganizationEvent, enriched *HealthEvent) error {
+	var accountID *string
+	if enriched.EventScope == healthTypes.EventScopeCodeAccountSpecific && len(enriched.AffectedAccounts) > 0 {
+		accountID = &enriched.AffectedAccounts[0]
 	}
 
 	details, err := m.health.DescribeEventDetailsForOrganization(ctx, &health.DescribeEventDetailsForOrganizationInput{
-		OrganizationEventDetailFilters: []healthTypes.EventAccountFilter{{EventArn: event.Arn, AwsAccountId: accountId}},
+		OrganizationEventDetailFilters: []healthTypes.EventAccountFilter{{EventArn: event.Arn, AwsAccountId: accountID}},
 	})
 	if err != nil {
-		panic(err.Error())
+		return fmt.Errorf("describing event details of %s: %w", aws.ToString(event.Arn), err)
 	}
 
-	enrichedEvent.Event = details.SuccessfulSet[0].Event
-	enrichedEvent.EventDescription = details.SuccessfulSet[0].EventDescription
+	if len(details.SuccessfulSet) == 0 {
+		return fmt.Errorf("no details available for event %s (%d failed)", aws.ToString(event.Arn), len(details.FailedSet))
+	}
+
+	enriched.Event = details.SuccessfulSet[0].Event
+	enriched.EventDescription = details.SuccessfulSet[0].EventDescription
+
+	return nil
 }
 
-func (m Metrics) getAffectedEntitiesForOrg(ctx context.Context, event healthTypes.OrganizationEvent, enrichedEvent *HealthEvent) {
-	pagResources := make([]*health.DescribeAffectedEntitiesForOrganizationPaginator, 0)
-	if len(enrichedEvent.AffectedAccounts) > 0 {
-		affectedAccountsSlices := m.splitSlice(enrichedEvent.AffectedAccounts, 10)
-		for _, slice := range affectedAccountsSlices {
-			accountFilter := make([]healthTypes.EventAccountFilter, len(slice))
-			for i, account := range slice {
-				accountFilter[i] = healthTypes.EventAccountFilter{EventArn: event.Arn, AwsAccountId: &account}
-			}
+func (m *Metrics) getAffectedEntitiesForOrg(ctx context.Context, event healthTypes.OrganizationEvent, enriched *HealthEvent) error {
+	// DescribeAffectedEntitiesForOrganization accepts at most 10 filters per
+	// request, so query the affected accounts in batches.
+	var filters [][]healthTypes.EventAccountFilter
 
-			pagResources = append(pagResources, health.NewDescribeAffectedEntitiesForOrganizationPaginator(
-				m.health,
-				&health.DescribeAffectedEntitiesForOrganizationInput{OrganizationEntityFilters: accountFilter},
-			),
-			)
+	if len(enriched.AffectedAccounts) > 0 {
+		for accounts := range slices.Chunk(enriched.AffectedAccounts, 10) {
+			filter := make([]healthTypes.EventAccountFilter, len(accounts))
+			for i := range accounts {
+				filter[i] = healthTypes.EventAccountFilter{EventArn: event.Arn, AwsAccountId: &accounts[i]}
+			}
+			filters = append(filters, filter)
 		}
 	} else {
-		pagResources = append(pagResources, health.NewDescribeAffectedEntitiesForOrganizationPaginator(
-			m.health,
-			&health.DescribeAffectedEntitiesForOrganizationInput{OrganizationEntityFilters: []healthTypes.EventAccountFilter{{EventArn: event.Arn}}},
-		),
-		)
+		filters = append(filters, []healthTypes.EventAccountFilter{{EventArn: event.Arn}})
 	}
 
-	for _, slices := range pagResources {
-		for slices.HasMorePages() {
-			resources, err := slices.NextPage(ctx)
+	for _, filter := range filters {
+		pag := health.NewDescribeAffectedEntitiesForOrganizationPaginator(
+			m.health,
+			&health.DescribeAffectedEntitiesForOrganizationInput{OrganizationEntityFilters: filter},
+		)
+
+		for pag.HasMorePages() {
+			resources, err := pag.NextPage(ctx)
 			if err != nil {
-				panic(err.Error())
+				return fmt.Errorf("describing affected entities of %s: %w", aws.ToString(event.Arn), err)
 			}
 
-			enrichedEvent.AffectedResources = append(enrichedEvent.AffectedResources, resources.Entities...)
+			enriched.AffectedResources = append(enriched.AffectedResources, resources.Entities...)
 		}
 	}
+
+	return nil
 }
 
-func (m *Metrics) GetOrgAccountsName(ctx context.Context) {
+func (m *Metrics) getOrgAccountsName(ctx context.Context) error {
 	org := organizations.NewFromConfig(m.awsconfig)
-	pag := organizations.NewListAccountsPaginator(
-		org,
-		&organizations.ListAccountsInput{},
-	)
+	pag := organizations.NewListAccountsPaginator(org, &organizations.ListAccountsInput{})
 
-	m.accountNames = make(map[string]string, 0)
+	m.accountNames = make(map[string]string)
 
 	for pag.HasMorePages() {
 		accounts, err := pag.NextPage(ctx)
 		if err != nil {
-			panic(err.Error())
+			return err
 		}
 
 		for _, account := range accounts.Accounts {
-			m.accountNames[*account.Id] = *account.Name
+			m.accountNames[aws.ToString(account.Id)] = aws.ToString(account.Name)
 		}
 	}
+
+	return nil
 }
 
-func (m Metrics) getAccountsNameFromIds(ids []string) []string {
+func (m *Metrics) getAccountsNameFromIds(ids []string) []string {
 	names := make([]string, len(ids))
 	for i, account := range ids {
 		if name, ok := m.accountNames[account]; ok {
@@ -157,14 +174,4 @@ func (m Metrics) getAccountsNameFromIds(ids []string) []string {
 	}
 
 	return names
-}
-
-func (m Metrics) splitSlice(slice []string, batchSize int) [][]string {
-	batches := make([][]string, 0, (len(slice)+batchSize-1)/batchSize)
-	for batchSize < len(slice) {
-		slice, batches = slice[batchSize:], append(batches, slice[0:batchSize:batchSize])
-	}
-	batches = append(batches, slice)
-
-	return batches
 }

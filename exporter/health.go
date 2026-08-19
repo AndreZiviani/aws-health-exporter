@@ -2,42 +2,48 @@ package exporter
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
+	"log/slog"
+	"slices"
 	"strings"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/health"
 	healthTypes "github.com/aws/aws-sdk-go-v2/service/health/types"
-	log "github.com/sirupsen/logrus"
-	"github.com/slack-go/slack"
 )
 
-func (m *Metrics) HealthOrganizationEnabled(ctx context.Context) bool {
-	enabled, err := m.health.DescribeHealthServiceStatusForOrganization(ctx, &health.DescribeHealthServiceStatusForOrganizationInput{})
+func (m *Metrics) healthOrganizationEnabled(ctx context.Context) bool {
+	status, err := m.health.DescribeHealthServiceStatusForOrganization(ctx, &health.DescribeHealthServiceStatusForOrganizationInput{})
 
-	if err == nil && *enabled.HealthServiceAccessStatusForOrganization == "ENABLED" {
-		return true
-	}
-
-	return false
+	return err == nil && aws.ToString(status.HealthServiceAccessStatusForOrganization) == "ENABLED"
 }
 
-func (m *Metrics) GetHealthEvents() []HealthEvent {
-	var tmp, events []HealthEvent
+// GetHealthEvents returns every AWS Health event updated since the last
+// scrape, after applying the ignore filters. New events are also forwarded to
+// Slack and to the log, when enabled.
+func (m *Metrics) GetHealthEvents(ctx context.Context) ([]HealthEvent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var all []HealthEvent
+	var err error
 
 	if m.organizationEnabled {
-		tmp = m.GetOrgEvents()
+		all, err = m.getOrgEvents(ctx)
 	} else {
-		tmp = m.GetAccountEvents()
+		all, err = m.getAccountEvents(ctx)
+	}
+	if err != nil {
+		return nil, err
 	}
 
-	for _, e := range tmp {
-		if ignoreEvents(m.ignoreEvents, *e.Event.EventTypeCode) {
+	events := make([]HealthEvent, 0, len(all))
+	for _, e := range all {
+		if slices.Contains(m.ignoreEvents, aws.ToString(e.Event.EventTypeCode)) {
 			continue
 		}
 
-		if ignoreResources(m.ignoreResources, e.AffectedResources) {
-			// only ignore this event if all resources are ignored
+		// only ignore an event if all of its resources are ignored
+		if allResourcesIgnored(m.ignoreResources, e.AffectedResources) {
 			continue
 		}
 
@@ -46,179 +52,101 @@ func (m *Metrics) GetHealthEvents() []HealthEvent {
 		}
 
 		events = append(events, e)
-		m.SendSlackNotification(e)
-		m.LogEvent(e)
+		m.sendSlackNotification(ctx, e)
+		m.logEvent(e)
 	}
 
-	return events
+	return events, nil
 }
 
-func (m Metrics) LogEvent(e HealthEvent) {
+func (m *Metrics) logEvent(e HealthEvent) {
 	if !m.logEvents {
 		return
 	}
-	msg := map[string]string{
-		"resources":  m.extractResources(e.AffectedResources),
-		"accounts":   m.extractAccounts(e.AffectedAccounts),
-		"service":    *e.Event.Service,
-		"region":     *e.Event.Region,
-		"status":     string(e.Event.StatusCode),
-		"Start Time": e.Event.StartTime.In(m.tz).String(),
-		"Event ARN":  fmt.Sprintf("`%s`", *e.Event.Arn),
-		"Updates":    *e.EventDescription.LatestDescription,
-	}
 
-	j, _ := json.Marshal(msg)
-
-	log.WithFields(log.Fields{
-		"event": string(j),
-	}).Info()
-
-}
-func (m Metrics) SendSlackNotification(e HealthEvent) {
-	if m.slackApi == nil {
-		return
-	}
-
-	resources := m.extractResources(e.AffectedResources)
-	accounts := m.extractAccounts(e.AffectedAccounts)
-
-	service := *e.Event.Service
-	region := *e.Event.Region
-	status := e.Event.StatusCode
-
-	var text, color string
-	attachmentFields := []slack.AttachmentField{
-		{Title: "Account(s)", Value: accounts, Short: true},
-		{Title: "Resource(s)", Value: resources, Short: true},
-		{Title: "Service", Value: service, Short: true},
-		{Title: "Region", Value: region, Short: true},
-		{Title: "Start Time", Value: e.Event.StartTime.In(m.tz).String(), Short: true},
-		{Title: "Status", Value: string(status), Short: true},
-		{Title: "Event ARN", Value: fmt.Sprintf("`%s`", *e.Event.Arn), Short: false},
-		{Title: "Updates", Value: *e.EventDescription.LatestDescription, Short: false},
-	}
-
-	if status == healthTypes.EventStatusCodeClosed {
-		text = fmt.Sprintf(":heavy_check_mark:*[RESOLVED] The AWS Health issue with the %s service in the %s region is now resolved.*", service, region)
-		color = "18be52"
-		attachmentFields = append(attachmentFields[:6], attachmentFields[5:]...)
-		if e.Event.EndTime != nil {
-			attachmentFields[5] = slack.AttachmentField{Title: "End Time", Value: e.Event.EndTime.In(m.tz).String(), Short: true}
-		} else {
-			attachmentFields[5] = slack.AttachmentField{Title: "End Time", Value: "-", Short: true}
-		}
-	} else {
-		text = fmt.Sprintf(":rotating_light:*[NEW] AWS Health reported an issue with the %s service in the %s region.*", service, region)
-		color = "danger"
-	}
-
-	attachment := slack.Attachment{
-		Color:  color,
-		Fields: attachmentFields,
-	}
-
-	_, _, err := m.slackApi.PostMessage(
-		m.slackChannel,
-		slack.MsgOptionText(text, false),
-		slack.MsgOptionAttachments(attachment),
+	slog.Info("aws health event",
+		"resources", m.extractResources(e.AffectedResources),
+		"accounts", m.extractAccounts(e.AffectedAccounts),
+		"service", aws.ToString(e.Event.Service),
+		"region", aws.ToString(e.Event.Region),
+		"status", string(e.Event.StatusCode),
+		"start_time", e.Event.StartTime.In(m.tz).String(),
+		"event_arn", aws.ToString(e.Event.Arn),
+		"updates", aws.ToString(e.EventDescription.LatestDescription),
 	)
-	if err != nil {
-		panic(err.Error())
-	}
 }
 
-func (m Metrics) extractResources(resources []healthTypes.AffectedEntity) string {
-	if len(resources) > 0 {
-		var tmp []string
-		for _, r := range resources {
-			tmp = append(tmp, *r.EntityValue)
-		}
-
-		resource := fmt.Sprintf("`%s`", strings.Join(tmp, ","))
-		if resource == "UNKNOWN" {
-			return "All resources in region"
-		}
-
-		return resource
+func (m *Metrics) extractResources(resources []healthTypes.AffectedEntity) string {
+	if len(resources) == 0 {
+		return "All resources in region"
 	}
 
-	return "All resources in region"
+	names := make([]string, 0, len(resources))
+	for _, r := range resources {
+		names = append(names, aws.ToString(r.EntityValue))
+	}
+
+	joined := strings.Join(names, ",")
+	if joined == "UNKNOWN" {
+		return "All resources in region"
+	}
+
+	return joined
 }
 
-func (m Metrics) extractAccounts(accounts []string) string {
-	if len(accounts) > 0 {
-		if m.organizationEnabled {
-			return strings.Join(m.getAccountsNameFromIds(accounts), ",")
-		} else {
-			return strings.Join(accounts, ",")
-		}
-	} else {
+func (m *Metrics) extractAccounts(accounts []string) string {
+	if len(accounts) == 0 {
 		return "All accounts in region"
 	}
-}
 
-func ignoreEvents(ignoredEvents []string, event string) bool {
-	for _, e := range ignoredEvents {
-		if e == event {
-			return true
-		}
+	if m.organizationEnabled {
+		return strings.Join(m.getAccountsNameFromIds(accounts), ",")
 	}
 
-	return false
+	return strings.Join(accounts, ",")
 }
 
-func ignoreResources(ignoredResources []string, resources []healthTypes.AffectedEntity) bool {
-	if len(ignoredResources) == 0 {
-		// empty ignore list
+// allResourcesIgnored reports whether every affected resource of an event is
+// on the ignore list. Events without affected resources are never ignored.
+func allResourcesIgnored(ignored []string, resources []healthTypes.AffectedEntity) bool {
+	if len(ignored) == 0 || len(resources) == 0 {
 		return false
 	}
 
-	size := len(resources)
-
-	for _, ignored := range ignoredResources {
-		for _, resource := range resources {
-			if *resource.EntityValue == ignored {
-				size -= 1
-			}
+	for _, resource := range resources {
+		if !slices.Contains(ignored, aws.ToString(resource.EntityValue)) {
+			return false
 		}
 	}
 
-	if size == 0 {
-		// all resources are ignored, ignoring entire alert
-		return true
-	}
-
-	// not all resources are ignored
-	return false
+	return true
 }
 
-func ignoreResourceEvent(ignoredResourceEvent []string, event HealthEvent) bool {
-	if len(ignoredResourceEvent) == 0 {
-		// empty ignore list
+// ignoreResourceEvent reports whether every affected resource of an event is
+// covered by an "<event type>:<resource identifier>" ignore rule.
+func ignoreResourceEvent(rules []string, event HealthEvent) bool {
+	if len(rules) == 0 || len(event.AffectedResources) == 0 {
 		return false
 	}
 
-	size := len(event.AffectedResources)
-	resourceIgnored := false
+	eventType := aws.ToString(event.Event.EventTypeCode)
 
-	for _, ignored := range ignoredResourceEvent {
-		tmp := strings.Split(ignored, ":")
-		ignoredEvent, ignoredResource := tmp[0], tmp[1]
-
-		for _, resource := range event.AffectedResources {
-			if *resource.EntityValue == ignoredResource && *event.Event.EventTypeCode == ignoredEvent {
-				resourceIgnored = true
-				size -= 1
+	for _, resource := range event.AffectedResources {
+		ignored := false
+		for _, rule := range rules {
+			// the resource identifier may contain ":" (e.g. an ARN), so only
+			// split on the first one
+			ruleEvent, ruleResource, ok := strings.Cut(rule, ":")
+			if ok && ruleEvent == eventType && ruleResource == aws.ToString(resource.EntityValue) {
+				ignored = true
+				break
 			}
+		}
+
+		if !ignored {
+			return false
 		}
 	}
 
-	if resourceIgnored && size == 0 {
-		// all resources are ignored, ignoring entire alert
-		return true
-	}
-
-	// not all resources are ignored
-	return false
+	return true
 }

@@ -2,29 +2,42 @@ package exporter
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"os"
-	"sort"
-	"strings"
+	"slices"
 	"time"
 	_ "time/tzdata"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
+	healthTypes "github.com/aws/aws-sdk-go-v2/service/health/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/slack-go/slack"
-	"github.com/urfave/cli/v2"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 )
 
-func NewMetrics(ctx context.Context, meter metric.Meter, c *cli.Context) (*Metrics, error) {
-	m := Metrics{}
+// New creates the exporter and registers the AWS Health event gauge on the
+// provided meter. Events are fetched lazily, on every scrape.
+func New(ctx context.Context, meter metric.Meter, opts Options) (*Metrics, error) {
+	m, err := newMetrics(ctx, opts)
+	if err != nil {
+		return nil, err
+	}
 
-	m.init(ctx, c)
+	gauge, err := meter.Int64ObservableGauge("event", metric.WithDescription("Status of AWS Health events"))
+	if err != nil {
+		return nil, err
+	}
 
-	g, _ := meter.Int64ObservableGauge("event", metric.WithDescription("Status of AWS Health events"))
-	meter.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
-		events := m.GetHealthEvents()
+	_, err = meter.RegisterCallback(func(ctx context.Context, o metric.Observer) error {
+		events, err := m.GetHealthEvents(ctx)
+		if err != nil {
+			slog.Error("failed to fetch AWS Health events", "error", err)
+			return err
+		}
+
 		for _, e := range events {
 			attributes := metric.WithAttributes(
 				attribute.Key("region").String(aws.ToString(e.Event.Region)),
@@ -34,82 +47,77 @@ func NewMetrics(ctx context.Context, meter metric.Meter, c *cli.Context) (*Metri
 				attribute.Key("code").String(aws.ToString(e.Event.EventTypeCode)),
 			)
 
-			status := int64(1) // open
-			if e.Event.StatusCode != "open" {
-				status = int64(0) // closed
+			status := int64(0) // closed
+			if e.Event.StatusCode == healthTypes.EventStatusCodeOpen {
+				status = 1 // open
 			}
 
 			if len(e.AffectedAccounts) > 0 {
 				for _, account := range e.AffectedAccounts {
-					o.ObserveInt64(g, status, attributes, metric.WithAttributes(attribute.Key("account").String(account)))
+					o.ObserveInt64(gauge, status, attributes, metric.WithAttributes(attribute.Key("account").String(account)))
 				}
 			} else {
-				o.ObserveInt64(g, status, attributes)
+				o.ObserveInt64(gauge, status, attributes)
 			}
 		}
 
 		return nil
-	}, g)
-
-	return &m, nil
-}
-
-func (m *Metrics) init(ctx context.Context, c *cli.Context) {
-	cfg, err := newAWSConfig(ctx)
-
+	}, gauge)
 	if err != nil {
-		panic(err.Error())
+		return nil, err
 	}
 
-	m.awsconfig = cfg
+	return m, nil
+}
 
-	if len(c.String("assume-role")) > 0 {
-		stsclient := sts.NewFromConfig(m.awsconfig)
-		creds := stscreds.NewAssumeRoleProvider(stsclient, c.String("assume-role"))
+func newMetrics(ctx context.Context, opts Options) (*Metrics, error) {
+	cfg, err := newAWSConfig(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	m := &Metrics{
+		awsconfig:           cfg,
+		lastScrape:          time.Now().Add(opts.TimeShift),
+		logEvents:           opts.LogEvents,
+		ignoreEvents:        opts.IgnoreEvents,
+		ignoreResources:     opts.IgnoreResources,
+		ignoreResourceEvent: opts.IgnoreResourceEvent,
+	}
+
+	if opts.AssumeRole != "" {
+		stsClient := sts.NewFromConfig(m.awsconfig)
+		creds := stscreds.NewAssumeRoleProvider(stsClient, opts.AssumeRole)
 		m.awsconfig.Credentials = aws.NewCredentialsCache(creds)
 	}
 
-	m.NewHealthClient(ctx)
-
-	m.lastScrape = time.Now().Add(c.Duration("time-shift"))
-
-	if len(c.String("slack-token")) > 0 && len(c.String("slack-channel")) > 0 {
-		m.slackToken = c.String("slack-token")
-		m.slackChannel = c.String("slack-channel")
-		m.slackApi = slack.New(m.slackToken)
+	if err := m.newHealthClient(ctx); err != nil {
+		return nil, err
 	}
 
-	m.organizationEnabled = m.HealthOrganizationEnabled(ctx)
+	if opts.SlackToken != "" && opts.SlackChannel != "" {
+		m.slackAPI = slack.New(opts.SlackToken)
+		m.slackChannel = opts.SlackChannel
+	}
+
+	m.organizationEnabled = m.healthOrganizationEnabled(ctx)
 	if m.organizationEnabled {
-		m.GetOrgAccountsName(ctx)
+		if err := m.getOrgAccountsName(ctx); err != nil {
+			return nil, fmt.Errorf("listing organization accounts: %w", err)
+		}
 	}
 
 	m.tz, err = time.LoadLocation(os.Getenv("TZ"))
 	if err != nil {
-		panic(err.Error())
+		return nil, fmt.Errorf("loading timezone from TZ environment variable: %w", err)
 	}
 
-	if c.String("regions") != "all-regions" {
-		m.regions = strings.Split(c.String("regions"), ",")
-		sort.Strings(m.regions)
+	// "all-regions" is kept for historical reasons, it is equivalent to not
+	// filtering regions at all.
+	if len(opts.Regions) > 0 && !slices.Contains(opts.Regions, "all-regions") {
+		m.regions = opts.Regions
+		slices.Sort(m.regions)
 	}
 
-	if len(c.String("ignore-events")) > 0 {
-		m.ignoreEvents = strings.Split(c.String("ignore-events"), ",")
-		sort.Strings(m.ignoreEvents)
-	}
-
-	if len(c.String("ignore-resources")) > 0 {
-		m.ignoreResources = strings.Split(c.String("ignore-resources"), ",")
-		sort.Strings(m.ignoreResources)
-	}
-
-	if len(c.String("ignore-resource-event")) > 0 {
-		m.ignoreResourceEvent = strings.Split(c.String("ignore-resource-event"), ",")
-		sort.Strings(m.ignoreResourceEvent)
-	}
-
-	if c.Bool("log-events") {
-		m.logEvents = true
-	}
+	return m, nil
 }
