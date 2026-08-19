@@ -9,7 +9,7 @@ This is a restriction imposed by AWS, check [the docs][health-api] for more info
 ## Features
 
 - Does not require a database
-- Sends AWS Health events to slack
+- Sends AWS Health events to Slack (using [Block Kit][block-kit] messages)
 - Expose events as Prometheus metrics
 
 ## How it works
@@ -46,9 +46,9 @@ You must specify, at least, the following parameters via command options or envi
 
 ## Filtering regions
 
-You can filter alerts from one or more regions with the flag `--regions`, you can set multiple regions separated by `,`.
-There are two special values:
-* `all-regions`: Do not filter any region, send alerts from all regions
+You can filter alerts from one or more regions with the flag `--regions`, you can set multiple regions separated by `,` (or by repeating the flag).
+By default alerts from all regions are sent. There are two special values:
+* `all-regions`: Do not filter any region, send alerts from all regions (the default)
 * `global`: Send alerts that are global and/or no account specific, this can be used with other regions (e.g. `global,us-east-1,us-west-1`)
 
 ## Ignoring alerts
@@ -96,6 +96,7 @@ Resource(s): vpn-01234567890abcdef
 A helm chart is available [here][chart]
 
 [aha-blog]: https://aws.amazon.com/blogs/mt/aws-health-aware-customize-aws-health-alerts-for-organizational-and-personal-aws-accounts/
+[block-kit]: https://api.slack.com/block-kit
 [health-api]: https://docs.aws.amazon.com/health/latest/ug/health-api.html
 [health-org]: https://docs.aws.amazon.com/health/latest/ug/aggregate-events.html
 [chart]: https://github.com/AndreZiviani/helm-charts/tree/main/charts/aws-health-exporter

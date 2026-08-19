@@ -1,18 +1,21 @@
-FROM golang:alpine as builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
+
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o aws-health-exporter .
+ARG VERSION=dev
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -trimpath -ldflags="-w -s -X main.version=${VERSION}" -o aws-health-exporter .
 
-FROM alpine:3.17
+FROM gcr.io/distroless/static-debian13:nonroot
 
-ENV HOME /app
-USER 1000:1000
+COPY --from=builder /app/aws-health-exporter /bin/aws-health-exporter
 
-WORKDIR /app
-
-COPY --from=builder /app/aws-health-exporter /bin
+USER nonroot:nonroot
 
 ENTRYPOINT ["/bin/aws-health-exporter"]
