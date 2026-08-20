@@ -58,7 +58,7 @@ func (m Metrics) LogEvent(e HealthEvent) {
 		return
 	}
 	msg := map[string]string{
-		"resources":  m.extractResources(e.AffectedResources),
+		"resources":  m.extractResources(e.AffectedResources, ", "),
 		"accounts":   m.extractAccounts(e.AffectedAccounts),
 		"service":    *e.Event.Service,
 		"region":     *e.Event.Region,
@@ -80,7 +80,7 @@ func (m Metrics) SendSlackNotification(e HealthEvent) {
 		return
 	}
 
-	resources := m.extractResources(e.AffectedResources)
+	resources := m.extractResources(e.AffectedResources, "\n")
 	accounts := m.extractAccounts(e.AffectedAccounts)
 
 	service := *e.Event.Service
@@ -128,19 +128,24 @@ func (m Metrics) SendSlackNotification(e HealthEvent) {
 	}
 }
 
-func (m Metrics) extractResources(resources []healthTypes.AffectedEntity) string {
+func (m Metrics) extractResources(resources []healthTypes.AffectedEntity, separator string) string {
 	if len(resources) > 0 {
 		var tmp []string
 		for _, r := range resources {
 			tmp = append(tmp, *r.EntityValue)
 		}
 
-		resource := fmt.Sprintf("`%s`", strings.Join(tmp, ","))
-		if resource == "UNKNOWN" {
+		if strings.Join(tmp, ",") == "UNKNOWN" {
 			return "All resources in region"
 		}
 
-		return resource
+		// wrap each resource in backticks so Slack does not interpret
+		// substrings like :aws: as emoji
+		for i, r := range tmp {
+			tmp[i] = fmt.Sprintf("`%s`", r)
+		}
+
+		return strings.Join(tmp, separator)
 	}
 
 	return "All resources in region"
@@ -149,9 +154,9 @@ func (m Metrics) extractResources(resources []healthTypes.AffectedEntity) string
 func (m Metrics) extractAccounts(accounts []string) string {
 	if len(accounts) > 0 {
 		if m.organizationEnabled {
-			return strings.Join(m.getAccountsNameFromIds(accounts), ",")
+			return strings.Join(m.getAccountsNameFromIds(accounts), ", ")
 		} else {
-			return strings.Join(accounts, ",")
+			return strings.Join(accounts, ", ")
 		}
 	} else {
 		return "All accounts in region"
