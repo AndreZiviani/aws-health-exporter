@@ -110,24 +110,24 @@ func (m *Metrics) getEventDetailsForOrg(ctx context.Context, event healthTypes.O
 func (m *Metrics) getAffectedEntitiesForOrg(ctx context.Context, event healthTypes.OrganizationEvent, enriched *HealthEvent) error {
 	// DescribeAffectedEntitiesForOrganization accepts at most 10 filters per
 	// request, so query the affected accounts in batches.
-	var filters [][]healthTypes.EventAccountFilter
+	var filters [][]healthTypes.EntityAccountFilter
 
 	if len(enriched.AffectedAccounts) > 0 {
 		for accounts := range slices.Chunk(enriched.AffectedAccounts, 10) {
-			filter := make([]healthTypes.EventAccountFilter, len(accounts))
+			filter := make([]healthTypes.EntityAccountFilter, len(accounts))
 			for i := range accounts {
-				filter[i] = healthTypes.EventAccountFilter{EventArn: event.Arn, AwsAccountId: &accounts[i]}
+				filter[i] = healthTypes.EntityAccountFilter{EventArn: event.Arn, AwsAccountId: &accounts[i]}
 			}
 			filters = append(filters, filter)
 		}
 	} else {
-		filters = append(filters, []healthTypes.EventAccountFilter{{EventArn: event.Arn}})
+		filters = append(filters, []healthTypes.EntityAccountFilter{{EventArn: event.Arn}})
 	}
 
 	for _, filter := range filters {
 		pag := health.NewDescribeAffectedEntitiesForOrganizationPaginator(
 			m.health,
-			&health.DescribeAffectedEntitiesForOrganizationInput{OrganizationEntityFilters: filter},
+			&health.DescribeAffectedEntitiesForOrganizationInput{OrganizationEntityAccountFilters: filter},
 		)
 
 		for pag.HasMorePages() {
