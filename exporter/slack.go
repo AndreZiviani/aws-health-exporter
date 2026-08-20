@@ -60,7 +60,7 @@ func (m *Metrics) slackMessage(e HealthEvent) (string, slack.Attachment) {
 
 	fields := []*slack.TextBlockObject{
 		mrkdwnField("Account(s)", m.extractAccounts(e.AffectedAccounts)),
-		mrkdwnField("Resource(s)", m.extractResources(e.AffectedResources)),
+		mrkdwnField("Resource(s)", m.extractResources(e.AffectedResources, "\n")),
 		mrkdwnField("Service", service),
 		mrkdwnField("Region", region),
 		mrkdwnField("Start Time", m.formatTime(e.Event.StartTime)),

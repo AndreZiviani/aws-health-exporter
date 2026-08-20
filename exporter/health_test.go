@@ -77,15 +77,15 @@ func TestIgnoreResourceEvent(t *testing.T) {
 func TestExtractResources(t *testing.T) {
 	m := &Metrics{}
 
-	if got := m.extractResources(nil); got != "All resources in region" {
+	if got := m.extractResources(nil, "\n"); got != "All resources in region" {
 		t.Errorf("extractResources(nil) = %q", got)
 	}
 
-	if got := m.extractResources(entities("UNKNOWN")); got != "All resources in region" {
+	if got := m.extractResources(entities("UNKNOWN"), "\n"); got != "All resources in region" {
 		t.Errorf("extractResources(UNKNOWN) = %q", got)
 	}
 
-	if got := m.extractResources(entities("a", "b")); got != "a,b" {
+	if got := m.extractResources(entities("a", "b"), "\n"); got != "`a`\n`b`" {
 		t.Errorf("extractResources(a, b) = %q", got)
 	}
 }

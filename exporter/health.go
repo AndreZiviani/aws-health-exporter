@@ -2,6 +2,7 @@ package exporter
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -65,7 +66,7 @@ func (m *Metrics) logEvent(e HealthEvent) {
 	}
 
 	slog.Info("aws health event",
-		"resources", m.extractResources(e.AffectedResources),
+		"resources", m.extractResources(e.AffectedResources, ", "),
 		"accounts", m.extractAccounts(e.AffectedAccounts),
 		"service", aws.ToString(e.Event.Service),
 		"region", aws.ToString(e.Event.Region),
@@ -76,7 +77,10 @@ func (m *Metrics) logEvent(e HealthEvent) {
 	)
 }
 
-func (m *Metrics) extractResources(resources []healthTypes.AffectedEntity) string {
+// extractResources renders the affected resources joined by separator. Each
+// resource is wrapped in backticks so Slack renders it verbatim instead of
+// interpreting substrings such as :aws: in an ARN as an emoji shortcode.
+func (m *Metrics) extractResources(resources []healthTypes.AffectedEntity, separator string) string {
 	if len(resources) == 0 {
 		return "All resources in region"
 	}
@@ -86,12 +90,15 @@ func (m *Metrics) extractResources(resources []healthTypes.AffectedEntity) strin
 		names = append(names, aws.ToString(r.EntityValue))
 	}
 
-	joined := strings.Join(names, ",")
-	if joined == "UNKNOWN" {
+	if strings.Join(names, ",") == "UNKNOWN" {
 		return "All resources in region"
 	}
 
-	return joined
+	for i, name := range names {
+		names[i] = fmt.Sprintf("`%s`", name)
+	}
+
+	return strings.Join(names, separator)
 }
 
 func (m *Metrics) extractAccounts(accounts []string) string {
@@ -100,10 +107,10 @@ func (m *Metrics) extractAccounts(accounts []string) string {
 	}
 
 	if m.organizationEnabled {
-		return strings.Join(m.getAccountsNameFromIds(accounts), ",")
+		return strings.Join(m.getAccountsNameFromIds(accounts), ", ")
 	}
 
-	return strings.Join(accounts, ",")
+	return strings.Join(accounts, ", ")
 }
 
 // allResourcesIgnored reports whether every affected resource of an event is
